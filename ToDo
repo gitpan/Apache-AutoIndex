@@ -1,0 +1,28 @@
+mod_autoindex Directives not implemented yet:
+---------------------------------------------
+AddDescription
+FancyIndexing/IndexOptions FancyIndexing 
+	They should be accepted both but merged.
+	Redesign the way the TH is generated to easily know if it
+	 should be fancy or not
+IndexOrderDefault
+IndexOptions:
+ IconHeights[=pixels]
+ IconsAreLinks
+ IconWidth[=pixels]
+ NameWidth[=n|*]
+ ScanHTMLTitles
+ SuppressColumnSorting
+ SuppressDescription
+*SuppressHTMLPreamble
+ SuppressLastModified
+ SuppressSize
+
+IndexOptions +/- inheritance settings
+--------------------------------------------
+
+Merging of configuration directives should be tuned-up
+
+Add new configuration directives (IndexOptions/PerlIndexOptions)
+
+

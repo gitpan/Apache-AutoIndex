@@ -1,0 +1,46 @@
+NAME
+    Apache::AutoIndex - Perl replacment for mod_autoindex and mod_dir Apache
+    module
+
+SYNOPSIS
+      PerlModule Apache::Icon
+      PerlModule Apache::AutoIndex
+      PerlHandler Apache::AutoIndex
+
+DESCRIPTION
+    This module can replace completely mod_dir and mod_autoindex standard
+    directory handling modules shipped with apache. It can currently live
+    right on top of those modules. But it also works if they are not even
+    compiled in.
+
+    To start using it on your site right away, simply preload Apache::Icon
+    and Apache::AutoIndex either with:
+
+      PerlModule Apache::Icon
+      PerlModule Apache::AutoIndex
+
+    in your httpd.conf file or with:
+
+       use Apache::Icon ();
+       use Apache::AutoIndex;
+     
+    in your require.pl file.
+
+    Then it's simply adding PerlHandler Apache::AutoIndex somewhere in your
+    httpd.conf but outside any Location/Directory containers.
+
+    It uses most of the Configuration Directives defined by mod_dir and
+    mod_autoindex. 
+
+SUPPORT
+    Please send any questions or comments to the Apache modperl mailing list
+    <modperl@apache.org> or to me at <gozer@ectoplasm.dyndns.com>
+
+AUTHOR
+    Philippe M. Chiasson <gozer@ectoplasm.dyndns.com>
+
+COPYRIGHT
+    Copyright (c) 1999 Philippe M. Chiasson. All rights reserved. This
+    program is free software; you can redistribute it and/or modify it under
+    the same terms as Perl itself.
+
