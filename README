@@ -5,13 +5,15 @@ NAME
 SYNOPSIS
       PerlModule Apache::Icon
       PerlModule Apache::AutoIndex
+      (PerlModule Image::Magick) optionnal
+      PerlTransHandler Apache::AutoIndex::transhandler
       PerlHandler Apache::AutoIndex
 
 DESCRIPTION
     This module can replace completely mod_dir and mod_autoindex
     standard directory handling modules shipped with apache. It can
-    currently live right on top of those modules. But it also works
-    if they are not even compiled in.
+    currently live right on top of those modules, but I suggest
+    simply making a new httpd without these modules compiled-in.
 
     To start using it on your site right away, simply preload
     Apache::Icon and Apache::AutoIndex either with:
@@ -26,38 +28,24 @@ DESCRIPTION
      
     in your require.pl file.
 
-    Then it's simply adding PerlHandler Apache::AutoIndex somewhere
-    in your httpd.conf but outside any Location/Directory
+    Then it's simply adding
+
+        PerlTransHandler Apache::Autoindex::transhandler
+        PerlHandler Apache::AutoIndex 
+
+    somewhere in your httpd.conf but outside any Location/Directory
     containers.
 
-    It uses most (pretty soon it'll be all) of the Configuration
-    Directives defined by mod_dir and mod_autoindex.
+THUMBNAILS
+    Since version 0.07, generation of thumbnails is possible. This
+    means that listing a directory that contains images can be
+    listed with little reduced thumbnails beside each image name
+    instead of the standard 'image' icon.
 
-    Since the documentation about all those directives can be found
-    on the apache website at:
-
-     http://www.apache.org/docs/mod/mod_autoindex.html 
-     http://www.apache.org/docs/mod/mod_dir.html
-
-    I will only list modification that might have occured in this
-    perl version.
-
-SUPPORT
-    Please send any questions or comments to the Apache modperl
-    mailing list <modperl@apache.org> or to me at
-    <gozer@ectoplasm.dyndns.com>
-
-NOTES
-    This code was made possible by :
-
-    *   Doug MacEachern <dougm@pobox.com> Creator of Apache::Icon, and
-        of course, mod_perl.
-
-    *   Rob McCool who produced the final mod_autoindex.c I copied,
-        hrm.., well, translated to perl.
-
-    *   The mod_perl mailing-list at <modperl@apache.org> for all your
-        mod_perl related problems.
+    To enable this you simply need to preload Image::Macick in
+    Apache. The IndexOption option Thumbnails controls thumbnails
+    generation for specific directories like any other IndexOption
+    directive.
 
 AUTHOR
     Philippe M. Chiasson <gozer@ectoplasm.dyndns.com>

@@ -1,20 +1,18 @@
-#$Id: AutoIndex.pm,v 1.14 1999/02/10 08:49:11 gozer Exp $
+#$Id: AutoIndex.pm,v 1.19 1999/02/22 20:30:51 gozer Exp $
 package Apache::AutoIndex;
 
 use strict;
 use Apache::Constants qw(:common OPT_INDEXES DECLINE_CMD REDIRECT DIR_MAGIC_TYPE);
 use DynaLoader ();
-use Apache;
 use Apache::Util qw(ht_time size_string);
 use Apache::ModuleConfig;
 use Apache::Icon;
 use Apache::Language;
 
 use vars qw ($VERSION @ISA);
-use vars qw ($nDir $nRedir $nIndex %sortname);
 
 @ISA = qw(DynaLoader);
-$VERSION="0.06";
+$VERSION="0.07";
 
 #Configuration constants
 use constant FANCY_INDEXING 	=> 1;
@@ -29,14 +27,32 @@ use constant THUMBNAILS 	    => 256;
 use constant SHOW_PERMS         => 512;
 use constant NO_OPTIONS		    => 1024;
 
+my %GenericDirectives = (   fancyindexing       =>  FANCY_INDEXING,
+                            iconsarelinks       =>  ICONS_ARE_LINKS,
+                            scanhtmltitles      =>  SCAN_HTML_TITLES,
+                            suppresslastmodified => SUPPRESS_LAST_MOD,
+                            suppresssize        =>  SUPPRESS_SIZE,
+                            suppressdescription =>  SUPPRESS_DESC,
+                            suppresshtmlperamble => SUPPRESS_PREAMBLE,
+                            suppresscolumnsorting =>SUPPRESS_COLSORT,
+                            thumbnails          =>  THUMBNAILS,
+                            showpermissions     =>  SHOW_PERMS,
+                        );
+
 #Default values
 use constant DEFAULT_ICON_WIDTH => 20;
 use constant DEFAULT_ICON_HEIGHT=> 22;
 use constant DEFAULT_NAME_WIDTH => 23;
 use constant DEFAULT_ORDER	=> "ND";
 
-my $debug;  
 
+
+#Global Options/Congiguration Directives
+my $config;
+$config->{debug}=0;  
+
+                            
+   
 #this should be a constant
 my %sortname =	( 	
             'N'	=> 	'Name' ,
@@ -46,9 +62,11 @@ my %sortname =	(
 		);
 			
 #Statistics variables
-$nDir=0;
-$nRedir=0;
-$nIndex=0;
+my $nDir=0;
+my $nRedir=0;
+my $nIndex=0;
+my $nThumb=0;
+
 
 if ($ENV{MOD_PERL}){
 	__PACKAGE__->bootstrap($VERSION);
@@ -62,45 +80,15 @@ sub IndexOptions($$$;*){
 	foreach (split /\s+/, $directives){
 		my $option;
 		(my $action, $_) = (lc $_) =~ /(\+|-)?(.*)/;
-		
-        if (/^fancyindexing$/){
-			$option = FANCY_INDEXING;
-			} 
-		elsif (/^iconsarelinks$/){
-			$option = ICONS_ARE_LINKS;
-			} 
-		elsif (/^scanhtmltitles$/){
-			$option = SCAN_HTML_TITLES;
-			}
-		elsif (/^suppresslastmodified$/){
-			$option =  SUPPRESS_LAST_MOD;
-			}
-		elsif (/^suppresssize$/){
-			$option =  SUPPRESS_SIZE;
-			}
-		elsif (/^suppressdescription$/){
-			$option =  SUPPRESS_DESC;
-			}
-		elsif (/^suppresshtmlperamble$/){
-			$option =  SUPPRESS_PREAMBLE;
-			}
-		elsif (/^suppresscolumnsorting$/){
-			$option =  SUPPRESS_COLSORT;
-			}
-		elsif (/^thumbnails$/){
-			$option = THUMBNAILS;
-			}
-        elsif (/^showpermissions$/){
-            $option = SHOW_PERMS;
-            }
-		elsif (/^none$/){
+
+		if (/^none$/){
 			die "Cannot combine '+' or '-' with 'None' keyword" if $action;
 			$cfg->{options} = NO_OPTIONS;
 			$cfg->{options_add} = 0;
 			$cfg->{options_del} = 0;
 			}
 		elsif (/^iconheight(=(\d*$|\*$)?)?(.*)$/){
-			die "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
+ warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
 			if ($2) {
 				die "Cannot combine '+' or '-' with IconHeight" if $action;
 				$cfg->{icon_height} = $2;
@@ -115,7 +103,7 @@ sub IndexOptions($$$;*){
 				}
 			}
 		elsif (/^iconwidth(=(\d*$|\*$)?)?(.*)$/){
-			die "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
+ warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
 			if ($2) {
 				die "Cannot combine '+' or '-' with IconWidth" if $action;
 				$cfg->{icon_width} = $2;
@@ -131,7 +119,7 @@ sub IndexOptions($$$;*){
 			}
 		
 		elsif (/^namewidth(=(\d*$|\*$)?)?(.*)$/){
-			die "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
+ warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
 			if ($2) {
 				die "Cannot combine '+' or '-' with NameWidth" if $action;
 				$cfg->{name_width} = $2;
@@ -141,8 +129,15 @@ sub IndexOptions($$$;*){
 				$cfg->{name_width} = 0;
 				}
 			}
-		else {
- warn "IndexOptions unknown/unsupported directive $_";
+		
+        else {
+			  foreach my $directive (keys %GenericDirectives){
+                if (/^$directive$/){
+                    $option = $GenericDirectives{$directive};
+                    last;                
+                    }
+                }
+ warn "IndexOptions unknown/unsupported directive $_" unless $option;
 			}
 		
 		if (! $action) {
@@ -172,13 +167,17 @@ return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
 sub DirectoryIndex($$$;*){
 	my ($cfg, $parms, $files, $cfg_fh) = @_;
 	for my $file (split /\s+/, $files){
-		push @{$cfg->{index}}, $file;
+		push @{$cfg->{indexfile}}, $file;
 	}
 return Apache->module('mod_dir.c') ? DECLINE_CMD : OK;
 }
 
 sub AddDescription($$$;*){
-	my ($cfg, $parms, $args, $cfg_fh) = @_;
+	#this is not completely supported.  
+    #Since I didn't take the time to fully check mod_autoindex.c behavior,
+    #I just implemented this as simplt as I could.
+    #It's in my TODO
+    my ($cfg, $parms, $args, $cfg_fh) = @_;
 	my ($desc, $files) = ( $args =~ /^\s*"([^"]*)"\s+(.*)$/);
 	my $file = join "|", split /\s+/, $files;
 	$file =~ s/\./\\./g;
@@ -207,7 +206,7 @@ return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
 
 sub FancyIndexing ($$$) {
 	my ($cfg, $parms, $arg) = @_;
-	die "FancyIndexing directive conflicts with existing INdexOptions None" if ($cfg->{options} & NO_OPTIONS);
+	die "FancyIndexing directive conflicts with existing IndexOptions None" if ($cfg->{options} & NO_OPTIONS);
 	my $opt = ( $arg =~ /On/ ) ? 1 : 0;
 	$cfg->{options} = ( $opt ? ( $cfg->{options} | FANCY_INDEXING ) : ($cfg->{options} & ~FANCY_INDEXING ));
 return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
@@ -241,6 +240,30 @@ sub HeaderName ($$$;*) {
 return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
 }
 
+
+	
+sub DIR_CREATE {
+	my $class = shift;
+	my $self = $class->new;
+	$self->{icon_width} = DEFAULT_ICON_WIDTH;
+	$self->{icon_height} = DEFAULT_ICON_HEIGHT;
+	$self->{name_width} = DEFAULT_NAME_WIDTH;
+	$self->{default_order} = DEFAULT_ORDER;
+	$self->{ignore} = [];
+	$self->{readme} = [];
+	$self->{header} = [];
+	$self->{indexfile} = [];
+	$self->{desc} = {};
+	$self->{options} = 0;
+	$self->{options_add} = 0;
+	$self->{options_del} = 0;
+return $self;
+}
+
+sub new { 
+	return bless {}, shift;
+	}
+
 sub DIR_MERGE {
 	my ($parent, $current) = @_;
 	my %new;
@@ -253,20 +276,23 @@ sub DIR_MERGE {
 	$new{readme} = [ @{$current->{readme}}, @{$parent->{readme}} ];
 	$new{header} = [ @{$current->{header}}, @{$parent->{header}} ];
 	$new{ignore} = [ @{$current->{ignore}}, @{$parent->{ignore}} ];
-	$new{index} = [ @{$current->{index}}, @{$parent->{index}} ];
+	$new{indexfile} = [ @{$current->{indexfile}}, @{$parent->{indexfile}} ];
 	
     $new{desc} = {% {$current->{desc}}};    #Keep descriptions local
 	
 	if ($current->{options} & NO_OPTIONS){
+        #None override all directives
 		$new{options} = NO_OPTIONS;
 		}
 	else {
 		if ($current->{options} == 0) {
+            #Options are all incremental, so combine them with parent's values
 			$new{options_add} = ( $parent->{options_add} | $current->{options_add}) & ~$current->{options_del};
-			$new{options_del} = ( $parent->{options_del} | $current->{options_add}) ;
+			$new{options_del} = ( $parent->{options_del} | $current->{options_del}) ;
 			$new{options} = $parent->{options} & ~NO_OPTIONS;
 			}
 		else {
+            #Options weren't all incremental, so forget about inheritance, simply override
 			$new{options} = $current->{options};
 			}
 		
@@ -276,27 +302,7 @@ sub DIR_MERGE {
 return bless \%new, ref($parent);
 }
 
-sub new { 
-	return bless {}, shift;
-	}
-	
-sub DIR_CREATE {
-	my $class = shift;
-	my $self = $class->new;
-	$self->{icon_width} = DEFAULT_ICON_WIDTH;
-	$self->{icon_height} = DEFAULT_ICON_HEIGHT;
-	$self->{name_width} = DEFAULT_NAME_WIDTH;
-	$self->{default_order} = DEFAULT_ORDER;
-	$self->{ignore} = [];
-	$self->{readme} = [];
-	$self->{header} = [];
-	$self->{index} = [];
-	$self->{desc} = {};
-	$self->{options} = 0;
-	$self->{options_add} = 0;
-	$self->{options_del} = 0;
-return $self;
-}
+
 sub dir_index {
 	my($r) = @_;
 	my $lang = new Apache::Language ($r);
@@ -311,13 +317,58 @@ sub dir_index {
 	return FORBIDDEN;
 	}
 	$nDir++;
-
+    
+    if ($cfg->{options} & THUMBNAILS){
+        use Storable;
+        $config->{cache_dir} = $r->dir_config("IndexCacheDir") || ".thumbnails";
+        $config->{dir_create} = $r->dir_config("IndexCreateDir") || 1;
+        
+        my $cachedir = $r->filename .  $config->{cache_dir} ;          
+        stat $cachedir;
+        $config->{cache_ok} = 1 if (-e _ && ( -r _ && -w _)) || ((not -e _) && $config->{dir_create} && mkdir $cachedir, 0744);
+        
+        my $oldopts;
+        if ($config->{cache_ok} && -e "$cachedir/.config"){
+            $oldopts = retrieve ("$cachedir/.config");
+            }    
+        
+        $config->{thumb_max_width} = $r->dir_config("ThumbMaxWidth") || DEFAULT_ICON_WIDTH*4;
+        $config->{thumb_max_height} = $r->dir_config("ThumbMaxHeight")|| DEFAULT_ICON_HEIGHT*4;
+        
+        $config->{thumb_max_size} = $r->dir_config("ThumbMaxSize") || 500000;
+        $config->{thumb_min_size} = $r->dir_config("ThumbMinSize") || 5000;
+      
+        $config->{thumb_width} = $r->dir_config("ThumbWidth");
+        $config->{thumb_height} = $r->dir_config("ThumbHeight");
+       
+        $config->{thumb_scale_width} = $r->dir_config("ThumbScaleWidth");
+        $config->{thumb_scale_height} = $r->dir_config("ThumbScaleHeight");
+       
+        $config->{changed} = 0;
+        
+        foreach (keys %$config){
+            next unless /^thumb/;
+            if ($config->{$_} != $oldopts->{$_})
+                {
+                $config->{changed} = 1;
+                last;
+                }
+            }
+        
+        unless ($config->{cache_ok} && store $config, "$cachedir/.config"){
+                $config->{changed} = 0;
+                };
+        }           
     
 	print "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\" \"http://www.w3.org/TR/REC-html40/loose.dtd\">\n<HTML><HEAD>\n<TITLE>" . $lang->message("Header") . $r->uri . "</TITLE></HEAD>";
     
- #warn This should be configurable...
-    print "<BODY BACKGROUND=\"$ENV{background}\" VLINK=\"#730000\">\n";
-	
+    my $body = "<BODY>";
+    if($r->dir_config("IndexHtmlBody")){
+        $body = 'print "' . $r->dir_config("IndexHtmlBody") . '"';
+        $body = eval $body;
+        }
+    print $body;
+    
     if (not $cfg->{options} & FANCY_INDEXING){
         print "<UL>\n";
         foreach my $file ( readdir DH ){
@@ -327,67 +378,86 @@ sub dir_index {
     return OK;
     }
 
+    if ($r->dir_config("IndexHtmlHead")){
+        $subr = $r->lookup_uri($r->dir_config("IndexHtmlHead"));
+        $subr->run;
+        }
+    
     
 	print "<H2>" . $lang->message("Header") . $r->uri . "</H2>\n" ;
 	
     place_doc($r, $cfg, 'header');
 	
-	print qq{<HR><TABLE BORDER="0" CELLSPACING="0" CELLPADDING="0" WIDTH="100% "><TR>};
+    $config->{table_html} = $r->dir_config("IndexHtmlTable") || 'BORDER="0"';
+    
+	print "<HR><TABLE ". $config->{table_html} ."><TR>";
  	
  	my $list = read_dir( $r, \*DH );
    
     %args = {} if ($cfg->{options} & SUPPRESS_COLSORT);
    
     my $listing = do_sort($list, \%args, $cfg->{default_order});
+    
     if ($cfg->{options} & SHOW_PERMS) {
         print "<TH>Perms</TH>" ;
         }
     
  	foreach ('N', 'M', 'S', 'D'){
-    next if( $cfg->{options} & SUPPRESS_LAST_MOD && $_ eq 'M');
-    next if( $cfg->{options} & SUPPRESS_SIZE && $_ eq 'S');
-    next if( $cfg->{options} & SUPPRESS_DESC && $_ eq 'D');
-    print "<TH>";
- 	if (not $cfg->{options} & SUPPRESS_COLSORT){
-        if ($args{$_}){
- 	        my $query = ($args{$_} eq "D") ? 'A' : 'D';
- 	        print "<A HREF=\"?$_=$query\"><I>" . $lang->message($sortname{$_}) . "</I></A>";
-        } else {
- 	        print "<A HREF=\"?$_=D\">" . $lang->message($sortname{$_}) . "</A>";
- 	        }
-        }
-    else {
-        print $lang->message($sortname{$_});
-        }
-    print "</TH>";
+        next if( $cfg->{options} & SUPPRESS_LAST_MOD && $_ eq 'M');
+        next if( $cfg->{options} & SUPPRESS_SIZE && $_ eq 'S');
+        next if( $cfg->{options} & SUPPRESS_DESC && $_ eq 'D');
+        
+        my $th = "<TH>";
+        $th = "<TH COLSPAN=2>" if $_ eq 'N';
+        print $th;
+ 	    
+        if (not $cfg->{options} & SUPPRESS_COLSORT){
+            if ($args{$_}){
+ 	            my $query = ($args{$_} eq "D") ? 'A' : 'D';
+ 	            print "<A HREF=\"?$_=$query\"><I>" . $lang->message($sortname{$_}) . "</I></A>";
+            } else {
+ 	            print "<A HREF=\"?$_=D\">" . $lang->message($sortname{$_}) . "</A>";
+ 	            }
+            }
+        else {
+            print $lang->message($sortname{$_});
+            }
+        print "</TH>";
     }
-   
     print "</TR>";
     
 	for my $entry (@$listing) {
-	    my $img;
- 	    if(($list->{$entry}{type} =~ m:^image/:) && ($cfg->{options} & THUMBNAILS )) {
-  	        #use the image itself for the icon
-  	        $img = $entry;
-  		    }
-  	    else 	{
- 	    	    $img = $list->{$entry}{icon};
- 		    }		      
-
-	    my $label = $entry eq '..'  ? $lang->message('Parent') : $entry;
+	    my $img = $list->{$entry}{icon};
+ 		my $label = $entry eq '..'  ? $lang->message('Parent') : $entry;
 
 	    print qq{<TR valign="bottom">};
 
+        #Permissions
         print "<TD>" . $list->{$entry}{mode} . "</TD>" if ($cfg->{options} & SHOW_PERMS);
 
-	    print "<TD><img width=20 height=22 src=\"$img\" alt=\"[$list->{$entry}{alt}]\"><a href=\"$entry";
+        #Icon
+	    print "<TD>";
+        if ($cfg->{options} & ICONS_ARE_LINKS) {
+            print "<TD><a href=\"$entry";
+	        print "/" if $list->{$entry}{sizenice} eq '-';
+	        print "\">";
+            }
+        print "<img width=\"" . $list->{$entry}{width} . "\" height=\"". $list->{$entry}{height} . "\" src=\"$img\" alt=\"[$list->{$entry}{alt}]\" BORDER=\"0\">";
+        print "</A>" if ($cfg->{options} & ICONS_ARE_LINKS);
+        print "</TD>";
+        
+        #Name
+        print "<TD><a href=\"$entry";
 	    print "/" if $list->{$entry}{sizenice} eq '-';
 	    print "\">$label</a></TD>";
 
+        #Last Modified
 	    print "<TD>$list->{$entry}{modnice}</TD>" unless ( $cfg->{options} & SUPPRESS_LAST_MOD );
 
-	    print "<TD align=\"center\">" . $list->{$entry}{sizenice} . "</TD>" unless ( $cfg->{options} & SUPPRESS_SIZE );
+        #Size
+	    print "<TD ALIGN=\"center\">" . $list->{$entry}{sizenice} . "</TD>" unless ( $cfg->{options} & SUPPRESS_SIZE );
 
+        #Description
 	    print "<TD>". $list->{$entry}{desc} . "</TD>" unless ( $cfg->{options} & SUPPRESS_DESC );
 
         print "</TR>\n";	  
@@ -395,22 +465,25 @@ sub dir_index {
 	
     print "</TABLE>\n";
 	
-	
 	place_doc($r, $cfg, 'readme');
 	
-	
 	print " <HR>" . $ENV{'SERVER_SIGNATURE'};
-	if ($debug) {
+	
+    if ($config->{debug}) {
 		use Data::Dumper;
 		print "<PRE>";
 		print "<HR>\%list<BR><BR>";
 		print Dumper \%$list;
-		print "<HR>\@listing<BR><BR>";
-		print Dumper \@$listing;
-		print "<HR>DUMP<BR><BR>";
+		print "<HR>\$cfg<BR><BR>";
 		print Dumper $cfg;
 		}
 	
+    
+    if ($r->dir_config("IndexHtmlFoot")){
+        $subr = $r->lookup_uri($r->dir_config("IndexHtmlFoot"));
+        $subr->run;
+        }
+    
     print "</BODY></HTML>";
 
 return OK
@@ -422,6 +495,15 @@ sub read_dir {
     my $cfg = Apache::ModuleConfig->get($r);
     my @listing;
     my %list;
+    my @accept;
+   
+    if($cfg->{options} & THUMBNAILS){
+        #Decode the content-encoding accept field of the client
+        foreach (split(',\s*',$r->header_in('Accept'))){
+           push @accept, $_ if m:^image/:;
+           }
+        }
+    
     while (my $file = readdir $dirhandle) {
 		foreach (@{$cfg->{ignore}}) {
 			if ($file =~ m/^$_$/){
@@ -432,7 +514,7 @@ sub read_dir {
 		next if $file eq '.';
         push @listing, $file;
 		}
-		foreach my $file (@listing){
+	foreach my $file (@listing){
 		my $subr = $r->lookup_file($file);
 		stat $subr->finfo;
 		$list{$file}{size} = -s _;
@@ -442,21 +524,42 @@ sub read_dir {
 		        }
         else {
             $list{$file}{sizenice} = size_string($list{$file}{size});
+            $list{$file}{sizenice} =~ s/\s*//;    
                 }
         $list{$file}{mod}  = (stat _)[9];
         $list{$file}{modnice} = ht_time($list{$file}{mod}, "%d-%b-%Y %H:%M", 0);
-		$list{$file}{mode} = write_mod((stat _)[2]);
-    	$list{$file}{type}  = $subr->content_type;
-	    my $icon = Apache::Icon->new($subr);
-		$list{$file}{icon} = $icon->find;           
+        $list{$file}{modnice} =~ s/\s/&nbsp;/g;
+		
+        $list{$file}{mode} = write_mod((stat _)[2]);
+    	
+        $list{$file}{type}  = $subr->content_type;
+	    
+        if(($list{$file}{type} =~ m:^image/:) && ($cfg->{options} & THUMBNAILS ) && Apache->module("Image::Magick"))
+            {
+            if ($config->{cache_ok}){
+                ($list{$file}{icon},$list{$file}{width},$list{$file}{height}) = get_thumbnail($r, $file, $list{$file}{mod}, $list{$file}{type}, @accept);
+               }
+            }
+        $list{$file}{height} ||= $cfg->{icon_height};
+        $list{$file}{width} ||= $cfg->{icon_width};
+        #icons size might be calculated on the fly and cached...
+        
+        my $icon = Apache::Icon->new($subr);
+		$list{$file}{icon} ||= $icon->find;           
 	    if (-d _) {	
 			$list{$file}{icon} ||= $icon->default('^^DIRECTORY^^');	
 			$list{$file}{alt} = "DIR";
 			}	    
 		$list{$file}{icon} ||= $icon->default;
-		$list{$file}{alt} ||= $icon->alt; 
+		
+        $list{$file}{alt} ||= $icon->alt; 
 		$list{$file}{alt} ||= "???"; 
-	 	if ($list{$file}{type} eq "text/html" and ($cfg->{options} & SCAN_HTML_TITLES)){
+	 	
+        foreach (keys %{$cfg->{desc}}){
+            $list{$file}{desc} = $cfg->{desc}{$_} if $subr->filename =~ /$_/;
+            }
+        
+        if ($list{$file}{type} eq "text/html" and ($cfg->{options} & SCAN_HTML_TITLES) and not $list{$file}{desc}){
             use HTML::HeadParser;
             my $parser = HTML::HeadParser->new;
             open FILE, $subr->filename;
@@ -466,44 +569,51 @@ sub read_dir {
             $list{$file}{desc} = $parser->header('Title');
             close FILE;
             }
-        foreach (keys %{$cfg->{desc}}){
-            $list{$file}{desc} = $cfg->{desc}{$_} if $subr->filename =~ /$_/;
-            }
+        
+        $list{$file}{desc} ||= "&nbsp;";
         }
 return \%list;
 }    
 
 sub transhandler {
     my $r = shift;
-	return DECLINED unless $r->uri =~ /\/$/;
-	my $cfg = Apache::ModuleConfig->get($r);
-    foreach (@{$cfg->{index}}) {
-		my $subr = $r->lookup_uri($r->uri . $_);
-    	if (stat $subr->finfo) {
-    	    $nIndex++;
+    return DECLINED unless $r->uri =~ /\/$/;
+    #This is not 100% right at this stage.
+    #This has to happend at this stage so there is no need to use internal_redirect or a subr
+    #But Location/Directory configuration isn't accessible yet... In the TODO
+    
+    my $cfg = Apache::ModuleConfig->get($r);
+    
+    foreach (@{$cfg->{indexfile}}){
+        my $subr = $r->lookup_uri($r->uri . $_);
+        last if ($subr->path_info);
+        if (stat $subr->finfo){
+            $nIndex++;
             $r->uri($subr->uri);
             last;
+            }
         }
-    }
 return DECLINED;
 }
 
 sub handler {
 	my $r = shift;
 	return DECLINED unless $r->content_type and $r->content_type eq DIR_MAGIC_TYPE;
-	
-	unless ($r->path_info) {
-		my $uri = $r->uri;
-		my $query = $r->args;
-		$query = "?" . $query if $query;
-		$r->header_out(Location => "$uri/$query");
-		$nRedir++;
-	return REDIRECT;	
-	}  
     
 	my $cfg = Apache::ModuleConfig->get($r);
-	$debug = $r->dir_config('AutoIndexDebug');
+	$config->{debug} = $r->dir_config('IndexDebug');
+    
+    unless ($r->path_info){
+        #Issue an external redirect if the dir isn't tailed with a '/'
+        my $uri = $r->uri;
+        my $query = $r->args;
+        $query = "?" . $query if $query;
+        $r->header_out(Location => "$uri/$query");
+        $nRedir++;
+        return REDIRECT;
+        }
 
+ 
 	if($r->allow_options & OPT_INDEXES) {
 	    $r->send_http_header("text/html");
 	    return OK if $r->header_only;
@@ -546,6 +656,72 @@ unshift @names, '..';           #puts back '..' on top of the pile
 return \@names;
 }
 
+sub get_thumbnail {
+    my ($r, $filename, $mod, $content, @accept) = @_; 
+    my $accept = join('|', @accept);
+    my $dir = $r->filename;
+    #these should sound better.
+    my $cachedir = $config->{cache_dir};
+   
+    my $xresize;
+    my $yresize;
+    
+    my $img = Image::Magick->new;
+    my($imgx, $imgy, $img_size, $img_type) = split(',', $img->Ping($dir . $filename));
+    #Is the image OK?
+    return "/icons/broken.gif" unless ($imgx && $imgy);
+    
+    if (($content =~ /$content/) && ($img_type =~ /JPE?G|GIF|PNG/i)){
+        #We know that what we'll generate will be seen.
+        if ($dir =~ /$cachedir\/$/){
+            #Avoiding recursive thumbnails from Hell
+            return $filename, $imgx, $imgy 
+            }
+        #The image is way too big to try to process...
+        return undef if $img_size > $config->{thumb_max_size};
+    
+        if (defined $config->{thumb_scale_width} || defined $config->{thumb_scale_height})
+            {
+            #Factor scaling
+            $xresize = $config->{thumb_scale_width} * $imgx if defined $config->{thumb_scale_width};
+            $yresize = $config->{thumb_scale_height} * $imgy if defined $config->{thumb_scale_height};           
+            }
+       
+        elsif(defined $config->{thumb_width} || defined $config->{thumb_height}){
+            #Absolute scaling
+            $xresize = $config->{thumb_width}  if defined $config->{thumb_width};
+            $yresize = $config->{thumb_height} if defined $config->{thumb_height};           
+            }
+       
+        #preserve ratio if we can
+        $xresize ||= $yresize * ($imgx/$imgy);
+        $yresize ||= $xresize * ($imgy/$imgx);   
+        
+        #default if values are missing.
+        $xresize ||= DEFAULT_ICON_WIDTH;
+        $yresize ||= DEFAULT_ICON_HEIGHT;
+        
+        #round off for picky browsers
+        $xresize = int($xresize);
+        $yresize = int($yresize);
+       
+        #Image is too small to actually resize.  Simply resize with the WIDTH and HEIGHT attributes of the IMG tag
+        return ($filename, $xresize , $yresize) if $img_size < $config->{thumb_min_size};
+       
+        if ($config->{changed} || $mod > (stat "$dir$cachedir/$filename")[9]){
+            #We should actually resize the image
+            if ($img->Read($dir . $filename)){
+                #Image is broken
+                return "/icons/broken.gif";
+                }
+            $nThumb++;
+            $img->Sample(width=>$xresize, height=>$yresize);
+            $img->Write("$dir$cachedir/$filename");       
+            }
+        return "$cachedir/$filename", $xresize , $yresize;
+        }   
+    return undef;
+    }
 
 sub place_doc {
 	my ($r, $cfg, $type) = @_;
@@ -601,6 +777,7 @@ sub status {
 	push (@s , "Done " . $nDir . " listings so far<BR>");
 	push (@s , "Done " . $nRedir . " redirects so far<BR>");
 	push (@s , "Done " . $nIndex. " indexes so far<BR>");
+    push (@s , "Done " . $nThumb. " thumbnails so far<BR>");
 	
 return \@s;
 }
@@ -617,6 +794,7 @@ Apache::AutoIndex - Perl replacment for mod_autoindex and mod_dir Apache module
 
   PerlModule Apache::Icon
   PerlModule Apache::AutoIndex
+  (PerlModule Image::Magick) optionnal
   PerlTransHandler Apache::AutoIndex::transhandler
   PerlHandler Apache::AutoIndex
 
@@ -633,7 +811,7 @@ Apache::Icon and Apache::AutoIndex either with:
   PerlModule Apache::Icon
   PerlModule Apache::AutoIndex
 
-in your httpd.conf file:
+in your httpd.conf file or with:
 
    use Apache::Icon ();
    use Apache::AutoIndex;
@@ -710,11 +888,33 @@ IndexOrderDefault
 
 =item * IndexOptions
 
-Thumbnails - Icons for images are small thumbnails.  Defaults to false.
+Thumbnails - Lisitng will now include thumbnails for pictures.  Defaults to false.
 
 ShowPermissions - prints file permissions. Defaults to false.
 
-=item * PerlSetVar AutoIndexDebug [0|1]
+=item * PerlSetVar IndexHtmlBody 'expression'
+
+This is an expression that should producea complete <BODY> tag when eval'ed.  One
+example could be :
+
+ PerlSetVar IndexHtmlBody '<BODY BACKGROUND=\"$ENV{BACKGROUND}\">'
+
+=item * PerlSetVar IndexHtmlTable value
+
+This is a string that will be inserted inside the table tag of the listing like 
+so : <TABLE $value>
+
+=item * PerlSetVar IndexHtmlHead value
+
+This should be the url (absolute/relative) of a ressource that would be inserted right
+after the <BODY> tag and before anything else is written.
+
+=item * PerlSetVar IndexHtmlFoot value
+
+This should be the url (absolute/relative) of a ressource that would be inserted right
+before the </BODY> tag and after everything else is written.
+
+=item * PerlSetVar IndexDebug [0|1]
 
 If set to 1, the listing displayed will print usefull (well, to me)
 debugging information appended to the bottom. The default is 0.
@@ -726,19 +926,120 @@ debugging information appended to the bottom. The default is 0.
 =over
 
 =item * - Hopefully none :-)
- 
+
+=back
+
+=head1 THUMBNAILS
+
+Since version 0.07, generation of thumbnails is possible.  This means that listing a
+directory that contains images can be listed with little reduced thumbnails beside each
+image name instead of the standard 'image' icon.
+
+To enable this you simply need to preload Image::Macick in Apache.  The IndexOption option
+Thumbnails controls thumbnails generation for specific directories like any other IndexOption
+directive.
+
+=head2 USAGE
+
+The way thumbnails are generated/produced can be configured in many ways, but here is a general
+overview of the procedure.
+
+For each directory containing pictures, there will be a .thumbnails directory in it that will
+hold the thumbnails.  Each time the directory is accessed, and if thumbnail generation is
+active, small thumbnails will be produced, shown beside each image name, instaed of the normal
+, generic, image icon.
+
+That can be done in 2 ways.  In the case the image is pretty small, no actual thumbnail will
+be created.  Instead the image will be resized with the HEIGHT and WIDTH attributes of the IMG 
+tag.
+
+If the image is big enough, it is resized with Image::Magick and saved in the .thumbnails directory
+for the next requests.
+
+Change in the configuration of the indexing options will correctly refresh the thumbnails stored.
+Also if an original image is modified, the thumbnail will be modified accordingly.  Still, the
+browser might screw things up if it preserves the cached images.  
+
+The behaviour of the Thumbnail generating code can be customized with these PerlSetVar variables:
+
+=head2 DIRECTIVES
+
+=over
+
+=item * IndexCacheDir dir
+
+This is the name of the directory in wich generated thumbnails will be created.  Make sure the
+user under wich the webserver runs has read and write privileges.  Defaults to .thumbnails
+
+=item * IndexCreateDir 0|1
+
+Specifies that when a cache directory isn't found, should an attempt to create it be done.
+Defaults to 1(true), meaning if possible, missing cache directories will be created. 
+
+=item * ThumbMaxFilesize bytes
+
+This value fixes the size of an image at wich thumbnail processing isn't even attempted.
+Since trying to process a few very big images could bring a server down to it's knees.
+Defaults to 500,000
+
+=item * ThumbMinFilesize bytes
+
+This value fixes the size of an image at wich thumbnail processing isn't actually done.
+Since trying to process already very small images could would be an overkill, the image is
+simply resized withe the size attributes of the IMG tag.  Defaults to 5,000.
+
+=item * ThumbMaxWidth pixels
+
+This value fixes the x-size of an image at wich thumbnail processing isn't actually done.
+Since trying to process already very small images could would be an overkill, the image is
+simply resized withe the size attributes of the IMG tag.  Defaults to 4 times the default
+icon width.
+
+=item * ThumbMaxHeight pixels
+
+This value fixes the y-size of an image at wich thumbnail processing isn't actually done.
+Since trying to process already very small images could would be an overkill, the image is
+simply resized withe the size attributes of the IMG tag.  Defaults to 4 times the default
+icon height
+
+=item * ThumbScaleWidth scaling-factor
+
+This value fixes an x-scaling factor between 0 and 1 to resize the images with.  The image ratio will be
+preserved only if there is no scaling factor for the other axis of the image. 
+
+=item * ThumbScaleHeight scaling-factor
+
+This value fixes an y-scaling factor between 0 and 1 to resize the images with.  The image ratio will be
+preserved only if there is no scaling factor for the other axis of the image. 
+
+=item * ThumbWidth pixels
+
+This value fixes a fixed x-dimension to resize the image with.  The image ratio will be
+preserved only if there is no fixed scaling factor for the other axis of the image.  This has no
+effect if a scaling factor is defined.
+
+=item * ThumbHeight pixels
+
+This value fixes a fixed x-dimension to resize the image with.  The image ratio will be
+preserved only if there is no fixed scaling factor for the other axis of the image.  This has no
+effect if a scaling factor is defined.
+
 =back
 
 =head1 TODO
 
-Generation of thumbnails with Apache::Magik instead of simply linking on the
-actual image.  And some sort of caching of thumbnails also.
+The transhandler problem should be fixed.
+
+Some minor changes to the thumbnails options will still have the thumbnails re-generated.  This 
+should be avoided by checking the attributes of the already existing thumbnail.
+
+Some form of garbage collection should be performed or cache directories will fill up.
 
 Find new things to add...
 
 =head1 SEE ALSO
 
-perl(1), L<Apache>(3), L<Apache::Icon>(3).
+perl(1), L<Apache>(3), L<Apache::Icon>(3), L<Image::Magick>(3) .
 
 =head1 SUPPORT
 
@@ -751,17 +1052,17 @@ This code was made possible by :
 
 =over
 
-=item *
+=item Doug MacEachern 
 
-Doug MacEachern <dougm@pobox.com>  Creator of Apache::Icon, and of course, mod_perl.
+<dougm@pobox.com>  Creator of Apache::Icon, and of course, mod_perl.
 
-=item *
+=item Rob McCool
 
-Rob McCool who produced the final mod_autoindex.c I copied, hrm.., well, translated to perl.
+who produced the final mod_autoindex.c I copied, hrm.., well, translated to perl.
 
-=item *
+=item The mod_perl mailing-list 
 
-The mod_perl mailing-list at <modperl@apache.org> for all your mod_perl related problems.
+at <modperl@apache.org> for all your mod_perl related problems.
 
 =back
 

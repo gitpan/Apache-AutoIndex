@@ -29,5 +29,7 @@ WriteMakefile(
 				'HTML::HeadParser' => 0,
 			     	'Apache'        => 0,
 				'Apache::Status' => 0,
-			   }, 
+				'Apache::Language' => 0,
+			   	'Storable'	=> 0,
+				}, 
 );
