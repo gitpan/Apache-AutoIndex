@@ -8,23 +8,25 @@ use ExtUtils::MakeMaker;
 my $class = __PACKAGE__;
 
 my @directives = (
-	[DirectoryIndex => 'a list of files names'],
+	[DirectoryIndex => ''],
 	[IndexIgnore    => 'one or more file extensions'],
 	[IndexOptions   => 'one or more options'],
 	[ReadmeName	=> ''],
 	[HeaderName	=> ''],	
 	[FancyIndexing  => ''],
 	[IndexOrderDefault => ''],
+	[AddDescription => ''],
 );
 
 command_table \@directives;
 
 WriteMakefile(
 	'NAME'	  	=> $class,
-	'VERSION_FROM'	=> "AutoIndex.pm",
+	'VERSION_FROM'	=> "AutoIndex.pm",            
 	'INC'		=> Apache::src->new->inc,
 	'PREREQ_PM'	=> { 
 				'Apache::Icon'  => '0.02',   
+				'HTML::HeadParser' => 0,
 			     	'Apache'        => 0,
 				'Apache::Status' => 0,
 			   }, 

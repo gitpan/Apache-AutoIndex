@@ -1,4 +1,5 @@
 AutoIndex.pm
+lib/Apache/AutoIndex.dic
 Changes
 MANIFEST
 Makefile.PL
