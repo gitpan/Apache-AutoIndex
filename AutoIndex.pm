@@ -1,4 +1,4 @@
-#$Id: AutoIndex.pm,v 1.10 1999/01/28 20:42:17 gozer Exp $
+#$Id: AutoIndex.pm,v 1.11 1999/01/29 07:14:19 gozer Exp $
 package Apache::AutoIndex;
 
 use strict;
@@ -12,7 +12,7 @@ use vars qw ($VERSION @ISA);
 use vars qw ($nDir $nRedir $nIndex %sortname);
 
 @ISA = qw(DynaLoader);
-$VERSION="0.04";
+$VERSION="0.05";
 
 use constant FANCY_INDEXING 	=> 1;
 use constant ICONS_ARE_LINKS 	=> 2;
@@ -29,7 +29,7 @@ use constant DEFAULT_ICON_HEIGHT=> 22;
 use constant DEFAULT_NAME_WIDTH => 23;
 use constant DEFAULT_ORDER	=> "ND";
 
-my $debug=1;
+my $debug;  
 my %sortname =	( 	'N'	, 	'Name' ,
 			'M'	,	'Last Modified',
 			'S'	,	'Size',

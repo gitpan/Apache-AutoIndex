@@ -1,10 +1,12 @@
 Revision history for Perl extension Apache::AutoIndex.
 
-0.04 Fri Jan 29 01:19:23 1999
+0.05 Fri Jan 29 01:19:23 1999
 	- Maintenance version
         - Added support for all mod_autoindex.c directives (+/- included)
 	- At this point it should work with anything mod_autoindex.c could handle
 	  maybe ignoring some directives, but it should produce an index anyway.
+
+0.04  Destroyed! forgot one friggin debug variable set :<
 
 0.03  Fri Jan 22 17:02:34 1999 
 	- Uploaded to CPAN!
