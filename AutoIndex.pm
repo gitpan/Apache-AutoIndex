@@ -1,4 +1,4 @@
-#$Id: AutoIndex.pm,v 1.19 1999/02/22 20:30:51 gozer Exp $
+#$Id: AutoIndex.pm,v 1.1 1999/06/29 14:09:25 gozer Exp $
 package Apache::AutoIndex;
 
 use strict;
@@ -9,10 +9,8 @@ use Apache::ModuleConfig;
 use Apache::Icon;
 use Apache::Language;
 
-use vars qw ($VERSION @ISA);
-
-@ISA = qw(DynaLoader);
-$VERSION="0.07";
+use vars qw ($VERSION);
+$VERSION="0.08";
 
 #Configuration constants
 use constant FANCY_INDEXING 	=> 1;
@@ -20,24 +18,27 @@ use constant ICONS_ARE_LINKS 	=> 2;
 use constant SCAN_HTML_TITLES 	=> 4;
 use constant SUPPRESS_LAST_MOD	=> 8;
 use constant SUPPRESS_SIZE  	=> 16;
-use constant SUPPRESS_DESC 	    => 32;
+use constant SUPPRESS_DESC 	=> 32;
 use constant SUPPRESS_PREAMBLE 	=> 64;
 use constant SUPPRESS_COLSORT 	=> 128;
-use constant THUMBNAILS 	    => 256;
+use constant THUMBNAILS 	=> 256;
 use constant SHOW_PERMS         => 512;
-use constant NO_OPTIONS		    => 1024;
+use constant NO_OPTIONS		=> 1024;
 
-my %GenericDirectives = (   fancyindexing       =>  FANCY_INDEXING,
-                            iconsarelinks       =>  ICONS_ARE_LINKS,
-                            scanhtmltitles      =>  SCAN_HTML_TITLES,
-                            suppresslastmodified => SUPPRESS_LAST_MOD,
-                            suppresssize        =>  SUPPRESS_SIZE,
-                            suppressdescription =>  SUPPRESS_DESC,
-                            suppresshtmlperamble => SUPPRESS_PREAMBLE,
-                            suppresscolumnsorting =>SUPPRESS_COLSORT,
-                            thumbnails          =>  THUMBNAILS,
-                            showpermissions     =>  SHOW_PERMS,
-                        );
+use vars qw(%GenericDirectives);
+%GenericDirectives = 
+(      
+fancyindexing         =>  FANCY_INDEXING,
+iconsarelinks         =>  ICONS_ARE_LINKS,
+scanhtmltitles        =>  SCAN_HTML_TITLES,
+suppresslastmodified  =>  SUPPRESS_LAST_MOD,
+suppresssize          =>  SUPPRESS_SIZE,
+suppressdescription   =>  SUPPRESS_DESC,
+suppresshtmlperamble  =>  SUPPRESS_PREAMBLE,
+suppresscolumnsorting =>  SUPPRESS_COLSORT,
+thumbnails            =>  THUMBNAILS,
+showpermissions       =>  SHOW_PERMS,
+);
 
 #Default values
 use constant DEFAULT_ICON_WIDTH => 20;
@@ -45,263 +46,35 @@ use constant DEFAULT_ICON_HEIGHT=> 22;
 use constant DEFAULT_NAME_WIDTH => 23;
 use constant DEFAULT_ORDER	=> "ND";
 
-
-
 #Global Options/Congiguration Directives
-my $config;
+use vars qw($config);
 $config->{debug}=0;  
-
-                            
-   
-#this should be a constant
-my %sortname =	( 	
-            'N'	=> 	'Name' ,
-			'M'	=>	'LastModified',
-			'S'	=>	'Size',
-			'D'	=>	'Description',
-		);
+             
+use vars qw(%sortname);
+%sortname =
+( 	
+'N'=>'Name' ,
+'M'=>'LastModified',
+'S'=>'Size',
+'D'=>'Description',
+);
 			
 #Statistics variables
-my $nDir=0;
-my $nRedir=0;
-my $nIndex=0;
-my $nThumb=0;
+use vars qw($nDir $nRedir $nIndex $nThumb);
+$nDir=0;
+$nRedir=0;
+$nIndex=0;
+$nThumb=0;
 
 
 if ($ENV{MOD_PERL}){
+	no strict;
+	@ISA=qw(DynaLoader);
 	__PACKAGE__->bootstrap($VERSION);
 	if (Apache->module('Apache::Status')){
 		Apache::Status->menu_item('AutoIndex' => 'Apache::AutoIndex status', \&status);
 		}
 }
-
-sub IndexOptions($$$;*){
-	my ($cfg, $parms, $directives, $cfg_fh) = @_;
-	foreach (split /\s+/, $directives){
-		my $option;
-		(my $action, $_) = (lc $_) =~ /(\+|-)?(.*)/;
-
-		if (/^none$/){
-			die "Cannot combine '+' or '-' with 'None' keyword" if $action;
-			$cfg->{options} = NO_OPTIONS;
-			$cfg->{options_add} = 0;
-			$cfg->{options_del} = 0;
-			}
-		elsif (/^iconheight(=(\d*$|\*$)?)?(.*)$/){
- warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
-			if ($2) {
-				die "Cannot combine '+' or '-' with IconHeight" if $action;
-				$cfg->{icon_height} = $2;
-				}
-			else 	{
-				if ($action eq '-') {
-					$cfg->{icon_height} = DEFAULT_ICON_HEIGHT;
-					}
-				else    {
-					$cfg->{icon_height} = 0;
-					}
-				}
-			}
-		elsif (/^iconwidth(=(\d*$|\*$)?)?(.*)$/){
- warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
-			if ($2) {
-				die "Cannot combine '+' or '-' with IconWidth" if $action;
-				$cfg->{icon_width} = $2;
-				}
-			else 	{
-				if ($action eq '-') {
-					$cfg->{icon_width} = DEFAULT_ICON_WIDTH;
-					}
-				else    {
-					$cfg->{icon_width} = 0;
-					}
-				}
-			}
-		
-		elsif (/^namewidth(=(\d*$|\*$)?)?(.*)$/){
- warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
-			if ($2) {
-				die "Cannot combine '+' or '-' with NameWidth" if $action;
-				$cfg->{name_width} = $2;
-				}
-			else 	{
-				die "NameWidth with no value can't be used with '+'" if ($action ne '-');
-				$cfg->{name_width} = 0;
-				}
-			}
-		
-        else {
-			  foreach my $directive (keys %GenericDirectives){
-                if (/^$directive$/){
-                    $option = $GenericDirectives{$directive};
-                    last;                
-                    }
-                }
- warn "IndexOptions unknown/unsupported directive $_" unless $option;
-			}
-		
-		if (! $action) {
-			
-			$cfg->{options} |= $option;
-			$cfg->{options_add} = 0;
-			$cfg->{options_del} = 0;
-			}
-		elsif ($action eq '+') {
-			
-			$cfg->{options_add} |= $option;
-			$cfg->{options_del} &= ~$option;
-			}
-		elsif ($action eq '-') {
-			
-			$cfg->{options_del} |= $option;
-			$cfg->{options_add} &= ~$option;
-			}
-		if (($cfg->{options} & NO_OPTIONS) && ($cfg->{options} & ~NO_OPTIONS)) {
-			die "Canot combine other IndexOptions keywords with 'None'";
-			}
-	}
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-# e.g. DirectoryIndex index.html index.htm index.cgi 
-sub DirectoryIndex($$$;*){
-	my ($cfg, $parms, $files, $cfg_fh) = @_;
-	for my $file (split /\s+/, $files){
-		push @{$cfg->{indexfile}}, $file;
-	}
-return Apache->module('mod_dir.c') ? DECLINE_CMD : OK;
-}
-
-sub AddDescription($$$;*){
-	#this is not completely supported.  
-    #Since I didn't take the time to fully check mod_autoindex.c behavior,
-    #I just implemented this as simplt as I could.
-    #It's in my TODO
-    my ($cfg, $parms, $args, $cfg_fh) = @_;
-	my ($desc, $files) = ( $args =~ /^\s*"([^"]*)"\s+(.*)$/);
-	my $file = join "|", split /\s+/, $files;
-	$file =~ s/\./\\./g;
-    $file =~ s/\*/.*/g;
-	$file =~ s/\?/./g;
-    $cfg->{desc}{$file} = $desc; 
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-sub IndexOrderDefault($$$;*){
-	my ($cfg, $parms, $string, $cfg_fh) = @_;
-	my ($order, $key ) = split /\s+/, $string;
-	die "First Keyword must be Ascending or ending" unless ( $order =~ /^(de|a)scending$/i);
-	die "First Keyword must be Name, Date, Size or Description" unless ( $key =~ /^(date|name|size|description)$/i);
-	if ($key =~ /date/i){
-		$key = 'M';
-		}
-	else {
-	    $key =~ s/(.).*$/$1/;
-	}
-	$order =~ s/(.).*$/$1/;
-	$cfg->{default_order} = $key . $order;
-
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-sub FancyIndexing ($$$) {
-	my ($cfg, $parms, $arg) = @_;
-	die "FancyIndexing directive conflicts with existing IndexOptions None" if ($cfg->{options} & NO_OPTIONS);
-	my $opt = ( $arg =~ /On/ ) ? 1 : 0;
-	$cfg->{options} = ( $opt ? ( $cfg->{options} | FANCY_INDEXING ) : ($cfg->{options} & ~FANCY_INDEXING ));
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-sub IndexIgnore($$$;*){
-	my ($cfg, $parms, $files, $cfg_fh) = @_;
-	for my $file (split /\s+/, $files){
-		$file =~ s/\./\\./g;
-		$file =~ s/\*/.+/g;
-		$file =~ s/\?/./g;
-		push @{$cfg->{ignore}}, $file;
-	}
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-sub ReadmeName($$$;*){
-	my ($cfg, $parms, $files, $cfg_fh) = @_;
-	for my $file (split /\s+/, $files){
-		die "Relative File Names only" if $file =~ m:^/: ;
-		push @{$cfg->{readme}}, $file;
-	}
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-sub HeaderName ($$$;*) {
-	my ($cfg, $parms, $files, $cfg_fh) = @_;
-	for my $file (split /\s+/, $files){
-	    push @{$cfg->{header}}, $file;
-	    }
-return Apache->module('mod_autoindex.c') ? DECLINE_CMD : OK;
-}
-
-
-	
-sub DIR_CREATE {
-	my $class = shift;
-	my $self = $class->new;
-	$self->{icon_width} = DEFAULT_ICON_WIDTH;
-	$self->{icon_height} = DEFAULT_ICON_HEIGHT;
-	$self->{name_width} = DEFAULT_NAME_WIDTH;
-	$self->{default_order} = DEFAULT_ORDER;
-	$self->{ignore} = [];
-	$self->{readme} = [];
-	$self->{header} = [];
-	$self->{indexfile} = [];
-	$self->{desc} = {};
-	$self->{options} = 0;
-	$self->{options_add} = 0;
-	$self->{options_del} = 0;
-return $self;
-}
-
-sub new { 
-	return bless {}, shift;
-	}
-
-sub DIR_MERGE {
-	my ($parent, $current) = @_;
-	my %new;
-    $new{options_add} = 0;
-    $new{options_del} = 0;
-	$new{icon_height} = $current->{icon_height} ? $current->{icon_height} : $parent->{icon_height};
-	$new{icon_width} = $current->{icon_width} ? $current->{icon_width} : $parent->{icon_width};
-	$new{name_width} = $current->{name_width} ? $current->{name_width} : $parent->{name_width};
-	$new{default_order} = $current->{default_order} ? $current->{default_order} : $parent->{default_order};
-	$new{readme} = [ @{$current->{readme}}, @{$parent->{readme}} ];
-	$new{header} = [ @{$current->{header}}, @{$parent->{header}} ];
-	$new{ignore} = [ @{$current->{ignore}}, @{$parent->{ignore}} ];
-	$new{indexfile} = [ @{$current->{indexfile}}, @{$parent->{indexfile}} ];
-	
-    $new{desc} = {% {$current->{desc}}};    #Keep descriptions local
-	
-	if ($current->{options} & NO_OPTIONS){
-        #None override all directives
-		$new{options} = NO_OPTIONS;
-		}
-	else {
-		if ($current->{options} == 0) {
-            #Options are all incremental, so combine them with parent's values
-			$new{options_add} = ( $parent->{options_add} | $current->{options_add}) & ~$current->{options_del};
-			$new{options_del} = ( $parent->{options_del} | $current->{options_del}) ;
-			$new{options} = $parent->{options} & ~NO_OPTIONS;
-			}
-		else {
-            #Options weren't all incremental, so forget about inheritance, simply override
-			$new{options} = $current->{options};
-			}
-		
-        $new{options} |= $new{options_add};
-		$new{options} &= ~ $new{options_del};
-		}
-return bless \%new, ref($parent);
-}
-
 
 sub dir_index {
 	my($r) = @_;
@@ -320,17 +93,19 @@ sub dir_index {
     
     if ($cfg->{options} & THUMBNAILS){
         use Storable;
+	#should check if Storable loaded ok.. Or is it part of the Perl dist??
         $config->{cache_dir} = $r->dir_config("IndexCacheDir") || ".thumbnails";
         $config->{dir_create} = $r->dir_config("IndexCreateDir") || 1;
         
         my $cachedir = $r->filename .  $config->{cache_dir} ;          
         stat $cachedir;
-        $config->{cache_ok} = 1 if (-e _ && ( -r _ && -w _)) || ((not -e _) && $config->{dir_create} && mkdir $cachedir, 0744);
+        $config->{cache_ok} = (-e _ && ( -r _ && -w _)) || ((not -e _) && $config->{dir_create} && mkdir $cachedir, 0755);
         
+
         my $oldopts;
-        if ($config->{cache_ok} && -e "$cachedir/.config"){
+        if ($config->{cache_ok} && -e "$cachedir/.config" && -r _){
             $oldopts = retrieve ("$cachedir/.config");
-            }    
+            }
         
         $config->{thumb_max_width} = $r->dir_config("ThumbMaxWidth") || DEFAULT_ICON_WIDTH*4;
         $config->{thumb_max_height} = $r->dir_config("ThumbMaxHeight")|| DEFAULT_ICON_HEIGHT*4;
@@ -355,19 +130,21 @@ sub dir_index {
                 }
             }
         
-        unless ($config->{cache_ok} && store $config, "$cachedir/.config"){
+	 
+        unless ($config->{cache_ok} && ((not -e "$cachedir/.config") || -w _) && store $config, "$cachedir/.config"){
                 $config->{changed} = 0;
                 };
         }           
     
 	print "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\" \"http://www.w3.org/TR/REC-html40/loose.dtd\">\n<HTML><HEAD>\n<TITLE>" . $lang->message("Header") . $r->uri . "</TITLE></HEAD>";
     
-    my $body = "<BODY>";
     if($r->dir_config("IndexHtmlBody")){
-        $body = 'print "' . $r->dir_config("IndexHtmlBody") . '"';
-        $body = eval $body;
+        eval 'print "' . $r->dir_config("IndexHtmlBody") . '"';
+        
         }
-    print $body;
+    else {
+        print "<BODY>";
+        }
     
     if (not $cfg->{options} & FANCY_INDEXING){
         print "<UL>\n";
@@ -378,21 +155,27 @@ sub dir_index {
     return OK;
     }
 
+    #HOME
+    $r->subprocess_env(upper => "<BR>");
+    $r->subprocess_env(center => "<CENTER><BIG>" . $r->uri . "</BIG></CENTER>");
+    $r->subprocess_env(notes => "<I><SMALL>Generated by <A HREF=\"http://ectoplasm.dyndns.com/~gozer/perl/\">Apache::AutoIndex</A></SMALL></I>");
+    $r->subprocess_env(counter => "none.dat");
+    ##HOME
+    
     if ($r->dir_config("IndexHtmlHead")){
         $subr = $r->lookup_uri($r->dir_config("IndexHtmlHead"));
         $subr->run;
         }
     
-    
-	print "<H2>" . $lang->message("Header") . $r->uri . "</H2>\n" ;
+    print "<H2>" . $lang->{"Header"} . $r->uri . "</H2>\n" ;
 	
     place_doc($r, $cfg, 'header');
 	
     $config->{table_html} = $r->dir_config("IndexHtmlTable") || 'BORDER="0"';
     
-	print "<HR><TABLE ". $config->{table_html} ."><TR>";
+    print "<HR><TABLE ". $config->{table_html} ."><TR>";
  	
- 	my $list = read_dir( $r, \*DH );
+    my $list = read_dir( $r, \*DH );
    
     %args = {} if ($cfg->{options} & SUPPRESS_COLSORT);
    
@@ -414,13 +197,13 @@ sub dir_index {
         if (not $cfg->{options} & SUPPRESS_COLSORT){
             if ($args{$_}){
  	            my $query = ($args{$_} eq "D") ? 'A' : 'D';
- 	            print "<A HREF=\"?$_=$query\"><I>" . $lang->message($sortname{$_}) . "</I></A>";
+ 	            print "<A HREF=\"?$_=$query\"><I>" . $lang->{$sortname{$_}} . "</I></A>";
             } else {
- 	            print "<A HREF=\"?$_=D\">" . $lang->message($sortname{$_}) . "</A>";
+ 	            print "<A HREF=\"?$_=D\">" . $lang->{$sortname{$_}} . "</A>";
  	            }
             }
         else {
-            print $lang->message($sortname{$_});
+            print $lang->{$sortname{$_}};
             }
         print "</TH>";
     }
@@ -430,7 +213,7 @@ sub dir_index {
 	    my $img = $list->{$entry}{icon};
  		my $label = $entry eq '..'  ? $lang->message('Parent') : $entry;
 
-	    print qq{<TR valign="bottom">};
+	    print qq{<TR valign="center">};
 
         #Permissions
         print "<TD>" . $list->{$entry}{mode} . "</TD>" if ($cfg->{options} & SHOW_PERMS);
@@ -465,9 +248,9 @@ sub dir_index {
 	
     print "</TABLE>\n";
 	
-	place_doc($r, $cfg, 'readme');
+    place_doc($r, $cfg, 'readme');
 	
-	print " <HR>" . $ENV{'SERVER_SIGNATURE'};
+    print " <HR>" . $ENV{'SERVER_SIGNATURE'};
 	
     if ($config->{debug}) {
 		use Data::Dumper;
@@ -503,8 +286,13 @@ sub read_dir {
            push @accept, $_ if m:^image/:;
            }
         }
-    
+	
     while (my $file = readdir $dirhandle) {
+		if ($file eq '..')
+			{
+			push @listing, $file;
+			next;
+			}
 		foreach (@{$cfg->{ignore}}) {
 			if ($file =~ m/^$_$/){
 				$file = '.';
@@ -512,15 +300,16 @@ sub read_dir {
 				}
 			}
 		next if $file eq '.';
-        push @listing, $file;
+        	push @listing, $file;
 		}
+   
 	foreach my $file (@listing){
 		my $subr = $r->lookup_file($file);
 		stat $subr->finfo;
 		$list{$file}{size} = -s _;
 		if (-d _){
-            $list{$file}{size} = -1;
-            $list{$file}{sizenice} = '-';
+            		$list{$file}{size} = -1;
+            		$list{$file}{sizenice} = '-';
 		        }
         else {
             $list{$file}{sizenice} = size_string($list{$file}{size});
@@ -577,7 +366,7 @@ return \%list;
 
 sub transhandler {
     my $r = shift;
-    return DECLINED unless $r->uri =~ /\/$/;
+   return DECLINED unless $r->uri =~ /\/$/;
     #This is not 100% right at this stage.
     #This has to happend at this stage so there is no need to use internal_redirect or a subr
     #But Location/Directory configuration isn't accessible yet... In the TODO
@@ -585,7 +374,7 @@ sub transhandler {
     my $cfg = Apache::ModuleConfig->get($r);
     
     foreach (@{$cfg->{indexfile}}){
-        my $subr = $r->lookup_uri($r->uri . $_);
+       my $subr = $r->lookup_uri($r->uri . $_);
         last if ($subr->path_info);
         if (stat $subr->finfo){
             $nIndex++;
@@ -601,18 +390,20 @@ sub handler {
 	return DECLINED unless $r->content_type and $r->content_type eq DIR_MAGIC_TYPE;
     
 	my $cfg = Apache::ModuleConfig->get($r);
-	$config->{debug} = $r->dir_config('IndexDebug');
+	$config->{debug} = $r->dir_config('AutoIndexDebug');
+	
+	
     
-    unless ($r->path_info){
-        #Issue an external redirect if the dir isn't tailed with a '/'
-        my $uri = $r->uri;
-        my $query = $r->args;
-        $query = "?" . $query if $query;
-        $r->header_out(Location => "$uri/$query");
-        $nRedir++;
-        return REDIRECT;
-        }
-
+    	unless ($r->path_info){
+        	#Issue an external redirect if the dir isn't tailed with a '/'
+        	my $uri = $r->uri;
+        	my $query = $r->args;
+        	$query = "?" . $query if $query;
+        	$r->header_out(Location => "$uri/$query");
+        	$nRedir++;
+        	return REDIRECT;
+        	}
+     
  
 	if($r->allow_options & OPT_INDEXES) {
 	    $r->send_http_header("text/html");
@@ -627,7 +418,7 @@ sub handler {
 
 
 sub do_sort {
-	my ($list, $query, $default) = @_;
+    my ($list, $query, $default) = @_;
     my @names = sort keys %$list;
     shift @names;                   #removes '..'
     
@@ -767,6 +558,216 @@ sub write_mod {
 return $letters;
 }
 
+#Configuration Stuff
+sub patternize{
+	my $pattern = shift;
+	$pattern =~ s/\./\\./g;
+    	$pattern =~ s/\*/.*/g;
+	$pattern =~ s/\?/./g;
+	return $pattern;
+}
+
+sub push_config{
+	my ($cfg, $parms, $value) = @_;
+	my $key = $parms->info;
+	if ($key eq 'ignore'){
+		$value = patternize($value);
+		}
+	push @ {$cfg->{$key}}, $value;
+return DECLINE_CMD if Apache->module('mod_autoindex.c');
+}
+
+sub DirectoryIndex($$$;*){
+	my ($cfg, $parms, $files, $cfg_fh) = @_;
+	for my $file (split /\s+/, $files){
+		push @{$cfg->{indexfile}}, $file;
+	}
+return DECLINE_CMD if Apache->module('mod_dir.c');
+}
+
+sub IndexOptions($$$;*){
+	my ($cfg, $parms, $directives, $cfg_fh) = @_;
+	foreach (split /\s+/, $directives){
+		my $option;
+		(my $action, $_) = (lc $_) =~ /(\+|-)?(.*)/;
+
+		if (/^none$/){
+			die "Cannot combine '+' or '-' with 'None' keyword" if $action;
+			$cfg->{options} = NO_OPTIONS;
+			$cfg->{options_add} = 0;
+			$cfg->{options_del} = 0;
+			}
+		elsif (/^iconheight(=(\d*$|\*$)?)?(.*)$/){
+			 warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
+			if ($2) {
+				die "Cannot combine '+' or '-' with IconHeight" if $action;
+				$cfg->{icon_height} = $2;
+				}
+			else 	{
+				if ($action eq '-') {
+					$cfg->{icon_height} = DEFAULT_ICON_HEIGHT;
+					}
+				else    {
+					$cfg->{icon_height} = 0;
+					}
+				}
+			}
+		elsif (/^iconwidth(=(\d*$|\*$)?)?(.*)$/){
+ 			warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
+			if ($2) {
+				die "Cannot combine '+' or '-' with IconWidth" if $action;
+				$cfg->{icon_width} = $2;
+				}
+			else 	{
+				if ($action eq '-') {
+					$cfg->{icon_width} = DEFAULT_ICON_WIDTH;
+					}
+				else    {
+					$cfg->{icon_width} = 0;
+					}
+				}
+			}
+		
+		elsif (/^namewidth(=(\d*$|\*$)?)?(.*)$/){
+			warn "Bad IndexOption $_ directive syntax" if ($3 || ($1 && !$2));
+			if ($2) {
+				die "Cannot combine '+' or '-' with NameWidth" if $action;
+				$cfg->{name_width} = $2;
+				}
+			else 	{
+				die "NameWidth with no value can't be used with '+'" if ($action ne '-');
+				$cfg->{name_width} = 0;
+				}
+			}
+		
+        	else {
+			foreach my $directive (keys %GenericDirectives){
+                	if (/^$directive$/){
+                    		$option = $GenericDirectives{$directive};
+                    		last;                
+                    		}
+                	}
+		 warn "IndexOptions unknown/unsupported directive $_" unless $option;
+		}
+		
+		if (! $action) {
+			$cfg->{options} |= $option;
+			$cfg->{options_add} = 0;
+			$cfg->{options_del} = 0;
+			}
+		elsif ($action eq '+') {
+			$cfg->{options_add} |= $option;
+			$cfg->{options_del} &= ~$option;
+			}
+		elsif ($action eq '-') {
+			$cfg->{options_del} |= $option;
+			$cfg->{options_add} &= ~$option;
+			}
+		if (($cfg->{options} & NO_OPTIONS) && ($cfg->{options} & ~NO_OPTIONS)) {
+			die "Cannot combine other IndexOptions keywords with 'None'";
+			}
+	}
+return DECLINE_CMD if Apache->module('mod_autoindex.c');
+}
+
+# e.g. DirectoryIndex index.html index.htm index.cgi 
+
+sub AddDescription($$$;*){
+    #this is not completely supported.  
+    #Since I didn't take the time to fully check mod_autoindex.c behavior,
+    #I just implemented this as simplt as I could.
+    #It's in my TODO
+    my ($cfg, $parms, $args, $cfg_fh) = @_;
+	my ($desc, $files) = ( $args =~ /^\s*"([^"]*)"\s+(.*)$/);
+	my $file = join "|", split /\s+/, $files;
+	$file = patternize($file);
+    $cfg->{desc}{$file} = $desc; 
+return DECLINE_CMD if Apache->module('mod_autoindex.c');
+}
+
+sub IndexOrderDefault($$$$){
+	my ($cfg, $parms, $order, $key) = @_;
+	die "First Keyword must be Ascending or ending" unless ( $order =~ /^(de|a)scending$/i);
+	die "First Keyword must be Name, Date, Size or Description" unless ( $key =~ /^(date|name|size|description)$/i);
+	if ($key =~ /date/i){
+		$key = 'M';
+		}
+	else {
+	    $key =~ s/(.).*$/$1/;
+	}
+	$order =~ s/(.).*$/$1/;
+	$cfg->{default_order} = $key . $order;
+
+return DECLINE_CMD if Apache->module('mod_autoindex.c');
+}
+
+sub FancyIndexing ($$$) {
+	my ($cfg, $parms, $opt) = @_;
+	die "FancyIndexing directive conflicts with existing IndexOptions None" if ($cfg->{options} & NO_OPTIONS);
+	$cfg->{options} = ( $opt ? ( $cfg->{options} | FANCY_INDEXING ) : ($cfg->{options} & ~FANCY_INDEXING ));
+return DECLINE_CMD if Apache->module('mod_autoindex.c');
+}
+	
+sub DIR_CREATE {
+	my $class = shift;
+	my $self = $class->new;
+	$self->{icon_width} = DEFAULT_ICON_WIDTH;
+	$self->{icon_height} = DEFAULT_ICON_HEIGHT;
+	$self->{name_width} = DEFAULT_NAME_WIDTH;
+	$self->{default_order} = DEFAULT_ORDER;
+	$self->{ignore} = [];
+	$self->{readme} = [];
+	$self->{header} = [];
+	$self->{indexfile} = [];
+	$self->{desc} = {};
+	$self->{options} = 0;
+	$self->{options_add} = 0;
+	$self->{options_del} = 0;
+return $self;
+}
+
+sub new { 
+	return bless {}, shift;
+	}
+
+sub DIR_MERGE {
+	my ($parent, $current) = @_;
+	my %new;
+    	$new{options_add} = 0;
+    	$new{options_del} = 0;
+	$new{icon_height} = $current->{icon_height} ? $current->{icon_height} : $parent->{icon_height};
+	$new{icon_width} = $current->{icon_width} ? $current->{icon_width} : $parent->{icon_width};
+	$new{name_width} = $current->{name_width} ? $current->{name_width} : $parent->{name_width};
+	$new{default_order} = $current->{default_order} ? $current->{default_order} : $parent->{default_order};
+	$new{readme} = [ @{$current->{readme}}, @{$parent->{readme}} ];
+	$new{header} = [ @{$current->{header}}, @{$parent->{header}} ];
+	$new{ignore} = [ @{$current->{ignore}}, @{$parent->{ignore}} ];
+	$new{indexfile} = [ @{$current->{indexfile}}, @{$parent->{indexfile}} ];
+	
+    	$new{desc} = {% {$current->{desc}}};    #Keep descriptions local
+	
+	if ($current->{options} & NO_OPTIONS){
+        	#None override all directives
+		$new{options} = NO_OPTIONS;
+		}
+	else {
+		if ($current->{options} == 0) {
+            		#Options are all incremental, so combine them with parent's values
+			$new{options_add} = ( $parent->{options_add} | $current->{options_add}) & ~$current->{options_del};
+			$new{options_del} = ( $parent->{options_del} | $current->{options_del}) ;
+			$new{options} = $parent->{options} & ~NO_OPTIONS;
+			}
+		else {
+            		#Options weren't all incremental, so forget about inheritance, simply override
+			$new{options} = $current->{options};
+			}
+		
+        	$new{options} |= $new{options_add};
+		$new{options} &= ~ $new{options_del};
+		}
+return bless \%new, ref($parent);
+}
+
 
 sub status {
 	my ($r, $q) = @_;
@@ -777,7 +778,11 @@ sub status {
 	push (@s , "Done " . $nDir . " listings so far<BR>");
 	push (@s , "Done " . $nRedir . " redirects so far<BR>");
 	push (@s , "Done " . $nIndex. " indexes so far<BR>");
-    push (@s , "Done " . $nThumb. " thumbnails so far<BR>");
+    	push (@s , "Done " . $nThumb. " thumbnails so far<BR>");
+
+	use Data::Dumper;
+	my $string = Dumper $cfg;
+	push (@s, $string);
 	
 return \@s;
 }

@@ -1,8 +1,8 @@
-AutoIndex.pm
-lib/Apache/AutoIndex.dic
 Changes
 MANIFEST
 Makefile.PL
 README
-t/test.t
+lib/Apache/AutoIndex.dic
+AutoIndex.pm
 t/icon.t
+t/test.t
