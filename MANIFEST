@@ -3,5 +3,5 @@ Changes
 MANIFEST
 Makefile.PL
 README
-ToDo
 t/test.t
+t/icon.t

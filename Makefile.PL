@@ -14,6 +14,7 @@ my @directives = (
 	[ReadmeName	=> ''],
 	[HeaderName	=> ''],	
 	[FancyIndexing  => ''],
+	[IndexOrderDefault => ''],
 );
 
 command_table \@directives;
